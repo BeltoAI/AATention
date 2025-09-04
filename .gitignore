@@ -1,4 +1,3 @@
-# Node / Next.js
 node_modules/
 .next/
 .vercel/
@@ -6,10 +5,8 @@ out/
 dist/
 .eslintcache
 *.log
-# env
 .env
 .env.local
 .env.*.local
-# OS junk
 .DS_Store
 Thumbs.db
