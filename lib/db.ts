@@ -1,15 +1,72 @@
 import { sql } from "@vercel/postgres";
-let initialized = false;
-export async function init() {
-  if (initialized) return;
-  initialized = true;
-  await sql`CREATE TABLE IF NOT EXISTS classes (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now());`;
-  await sql`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, class_id TEXT NOT NULL, start_at TIMESTAMPTZ NOT NULL, end_at TIMESTAMPTZ, secret TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now());`;
-  await sql`CREATE TABLE IF NOT EXISTS students (id TEXT PRIMARY KEY, name TEXT NOT NULL, student_code TEXT, created_at TIMESTAMPTZ DEFAULT now());`;
-  await sql`CREATE TABLE IF NOT EXISTS attendance (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, student_id TEXT NOT NULL, checkin_at TIMESTAMPTZ NOT NULL, checkout_at TIMESTAMPTZ, geo_lat DOUBLE PRECISION, geo_lon DOUBLE PRECISION, user_agent TEXT, created_at TIMESTAMPTZ DEFAULT now());`;
+import crypto from "node:crypto";
+
+export type ID = string;
+export type Status = "present" | "late" | "excused" | "absent";
+
+export function id(): ID {
+  return crypto.randomUUID();
 }
-export async function q(strings: TemplateStringsArray, ...values: any[]) {
-  await init();
-  // @ts-ignore
-  return sql(strings, ...values);
+
+export async function ensureSchema() {
+  await sql`
+    create table if not exists teachers (
+      id text primary key,
+      name text not null,
+      email text,
+      created_at timestamp default now()
+    );
+    create table if not exists classes (
+      id text primary key,
+      teacher_id text references teachers(id) on delete cascade,
+      name text not null,
+      code text unique not null,
+      created_at timestamp default now()
+    );
+    create index if not exists idx_classes_teacher on classes(teacher_id);
+
+    create table if not exists students (
+      id text primary key,
+      class_id text references classes(id) on delete cascade,
+      name text not null,
+      email text,
+      created_at timestamp default now()
+    );
+    create index if not exists idx_students_class on students(class_id);
+
+    create table if not exists sessions (
+      id text primary key,
+      class_id text references classes(id) on delete cascade,
+      on_date date not null,
+      created_at timestamp default now(),
+      unique(class_id, on_date)
+    );
+    create index if not exists idx_sessions_class on sessions(class_id);
+
+    create table if not exists attendance (
+      id text primary key,
+      session_id text references sessions(id) on delete cascade,
+      student_id text references students(id) on delete cascade,
+      status text not null,
+      note text,
+      updated_at timestamp default now(),
+      unique(session_id, student_id)
+    );
+    create index if not exists idx_attendance_session on attendance(session_id);
+  `;
+}
+
+export async function upsertTeacherByEmail(name: string, email?: string) {
+  const teacherId = id();
+  if (email) {
+    const existing = await sql`select * from teachers where email=${email} limit 1`;
+    if (existing.rows.length) return existing.rows[0];
+  }
+  const res = await sql`insert into teachers (id, name, email) values (${teacherId}, ${name}, ${email || null}) returning *`;
+  return res.rows[0];
+}
+
+export function code6() {
+  const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({ length: 6 }, () => a[Math.floor(Math.random() * a.length)]).join("");
 }
